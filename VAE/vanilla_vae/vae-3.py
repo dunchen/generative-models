@@ -1,0 +1,189 @@
+import torch
+import torch.nn.functional as nn
+import torch.nn as nn2
+import torch.autograd as autograd
+import torch.optim as optim
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import os
+from torch.autograd import Variable
+from tensorflow.examples.tutorials.mnist import input_data
+import math
+
+mnist = input_data.read_data_sets('../../MNIST_data', one_hot=True)
+mb_size = 64
+Z_dim = 100
+X_dim = mnist.train.images.shape[1]
+y_dim = mnist.train.labels.shape[1]
+h_dim = 128
+c = 0
+lr = 1e-3
+
+
+def xavier_init(size):
+    in_dim = size[0]
+    xavier_stddev = 1. / np.sqrt(in_dim / 2.)
+    return torch.randn(*size) * xavier_stddev
+
+def normal_d(mu,var,x):
+    return 1/(np.sqrt(2*math.pi)*var+1e-8)*np.exp(-1/(2*var*var+1e-8)*(x-mu)*(x-mu))
+
+# =============================== Q(z|X) ======================================
+
+'''
+Wxh = xavier_init(size=[X_dim, h_dim])
+bxh = Variable(torch.zeros(h_dim), requires_grad=True).cuda()
+
+Whz_mu = xavier_init(size=[h_dim, Z_dim])
+bhz_mu = Variable(torch.zeros(Z_dim), requires_grad=True).cuda()
+
+Whz_var = xavier_init(size=[h_dim, Z_dim])
+bhz_var = Variable(torch.zeros(Z_dim), requires_grad=True).cuda()
+
+
+def Q(X):a
+    h = nn.relu(X @ Wxh + bxh.repeat(X.size(0), 1))
+    z_mu = h @ Whz_mu + bhz_mu.repeat(h.size(0), 1)
+    z_var = h @ Whz_var + bhz_var.repeat(h.size(0), 1)
+    return z_mu, z_var
+
+
+def sample_z(mu, log_var):
+    eps = Variable(torch.randn(mb_size, Z_dim))
+    return mu + torch.exp(log_var / 2) * eps
+'''
+
+# =============================== P(X|z) ======================================
+
+'''
+Wzh = xavier_init(size=[Z_dim, h_dim])
+bzh = Variable(torch.zeros(h_dim), requires_grad=True).cuda()
+
+Whx = xavier_init(size=[h_dim, X_dim])
+bhx = Variable(torch.zeros(X_dim), requires_grad=True).cuda()
+
+
+def P(z):
+    h = nn.relu(z @ Wzh + bzh.repeat(z.size(0), 1))
+    X = nn.sigmoid(h @ Whx + bhx.repeat(h.size(0), 1))
+    return X
+
+'''
+def sample_z(mu, log_var):
+		eps = Variable(torch.randn(mb_size, Z_dim))
+		return mu + torch.exp(log_var / 2) * eps
+
+class SimpleNN(torch.nn.Module):
+	def __init__(self,X_dim,h_dim,Z_dim):
+		super(SimpleNN,self).__init__()
+		self.Wxh=nn2.Parameter(xavier_init(size=[X_dim, h_dim]))
+		self.bxh=nn2.Parameter(torch.zeros(h_dim))
+		self.Whz_mu = nn2.Parameter(xavier_init(size=[h_dim, Z_dim]))
+		self.bhz_mu = nn2.Parameter(torch.zeros(Z_dim))
+		self.Whz_var = nn2.Parameter(xavier_init(size=[h_dim, Z_dim]))
+		self.bhz_var = nn2.Parameter(torch.zeros(Z_dim))
+		self.Wzh = nn2.Parameter(xavier_init(size=[Z_dim, h_dim]))
+		self.bzh = nn2.Parameter(torch.zeros(h_dim))
+		
+		self.Whx_mu = nn2.Parameter(xavier_init(size=[h_dim, X_dim]))
+		self.bhx_mu = nn2.Parameter(torch.zeros(X_dim))
+		self.Whx_var = nn2.Parameter(xavier_init(size=[h_dim, X_dim]))
+		self.bhx_var = nn2.Parameter(torch.zeros(X_dim))
+
+		#self.Whx_mu = nn2.Parameter(xavier_init(size=[h_dim, X_dim]))
+		
+		#self.bhx = nn2.Parameter(torch.zeros(X_dim))
+	
+	def Q(self,X):
+		h = nn.relu(X @ self.Wxh + self.bxh.repeat(X.size(0), 1))
+		z_mu = h @ self.Whz_mu + self.bhz_mu.repeat(h.size(0), 1)
+		z_var = h @ self.Whz_var + self.bhz_var.repeat(h.size(0), 1)
+		return z_mu, z_var
+	
+	def P(self,z):
+		h = nn.relu(z @ self.Wzh + self.bzh.repeat(z.size(0), 1))
+		x_mu=nn.relu(h @ self.Whx_mu + self.bhx_mu.repeat(h.size(0),1))
+		x_var=nn.relu(h @ self.Whx_var + self.bhx_var.repeat(h.size(0),1))		
+		return x_mu, x_var
+	
+	def forward(self, X):
+		z_mu, z_var = self.Q(X)
+		eps = Variable(torch.randn(mb_size,Z_dim)).cuda()
+		z = z_mu + torch.exp(z_var / 2) * eps
+		X_sample_mu, X_sample_var = self.P(z)
+		eps2= Variable(torch.randn(mb_size,X_dim)).cuda()
+		X_sample=X_sample_mu+torch.exp(X_sample_var/2)*eps2
+		return z_mu,z_var,z,X_sample_mu,X_sample_var, X_sample
+
+model=SimpleNN(X_dim,h_dim,Z_dim).cuda()
+
+# =============================== TRAINING ====================================
+
+#params = [Wxh, bxh, Whz_mu, bhz_mu, Whz_var, bhz_var,
+#          Wzh, bzh, Whx, bhx]
+
+solver = optim.Adam(model.parameters(),lr=lr)
+
+for it in range(5000):
+    X, _ = mnist.train.next_batch(mb_size)
+    X = Variable(torch.from_numpy(X)).cuda()
+    solver.zero_grad()
+    # Forward
+    #z_mu, z_var = Q(X)
+    #z = sample_z(z_mu, z_var)
+    #X_sample = P(z)
+
+    z_mu,z_var,z,X_sample_mu,X_sample_var,X_sample=model(X)
+    # Loss
+    #recon_loss = nn.binary_cross_entropy(torch.normal(X_sample_mu,X_sample_var).cuda(), X, size_average=False) / mb_size
+    
+    recon_loss=0
+    for i in range(mb_size):
+        rt=1
+        for j in range(X_dim):
+            rt=rt*normal_d(X_sample_mu.data[i,j],X_sample_var.data[i,j],X.data[i,j])
+        recon_loss =+ np.log(rt)
+    recon_loss=recon_loss/mb_size
+
+    kl_loss = torch.mean(0.5 * torch.sum(torch.exp(z_var) + z_mu**2 - 1. - z_var, 1))
+    loss = Variable(torch.from_numpy(recon_loss)) + kl_loss
+
+
+    # Backward
+    loss.backward()
+
+    # Update
+    solver.step()
+
+    # Housekeeping
+    #for p in params:
+    #    if p.grad is not None:
+    #        data = p.grad.data
+    #        p.grad = Variable(data.new().resize_as_(data).zero_())
+
+    #[o.zero_grad() for o in model.parameters()]
+    
+    # Print and plot every now and then
+    if it % 1000 == 0:
+        print('Iter-{}; Loss: {:.4}'.format(it, loss.data[0]))
+        samples = torch.normal(X_sample_mu,X_sample_var).data.numpy()[:16]
+
+        fig = plt.figure(figsize=(4, 4))
+        gs = gridspec.GridSpec(4, 4)
+        gs.update(wspace=0.05, hspace=0.05)
+
+        for i, sample in enumerate(samples):
+            ax = plt.subplot(gs[i])
+            plt.axis('off')
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+            ax.set_aspect('equal')
+            plt.imshow(sample.reshape(28, 28), cmap='Greys_r')
+
+        if not os.path.exists('out/'):
+            os.makedirs('out/')
+
+        plt.savefig('out/{}.png'.format(str(c).zfill(3)), bbox_inches='tight')
+        c += 1
+        plt.close(fig)
